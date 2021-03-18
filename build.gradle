@@ -1,0 +1,35 @@
+plugins {
+    id 'java'
+    id 'maven'
+    id 'com.github.johnrengelman.shadow' version '4.0.4'
+}
+
+group 'cn.enaium'
+version '0.1'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation('commons-io:commons-io:1.0')
+    implementation('com.google.code.gson:gson:2.8.0')
+}
+
+shadowJar {
+    dependencies {
+        include(dependency('com.google.code.gson:gson'))
+        include(dependency('commons-io:commons-io'))
+    }
+}
+
+uploadArchives {
+    repositories.mavenDeployer {
+        def MAVEN_URL = System.getenv('MAVEN_URL')
+        if(MAVEN_URL != null) {
+            repository(url: "file://${new File(MAVEN_URL)}")
+        }
+    }
+}
+
+artifacts { archives shadowJar }
