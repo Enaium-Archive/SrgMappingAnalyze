@@ -1,6 +1,6 @@
 # SrgMappingAnalyze
 
-Use `java -cp .\SrgMappingAnalyze-1.0.jar cn.enaium.sma.SrgMappingAnalyze`
+Use `java -cp .\SrgMappingAnalyze-0.1.jar cn.enaium.sma.SrgMappingAnalyze`
 
 ## Features
 
