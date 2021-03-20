@@ -12,6 +12,10 @@ Input Srg Mapping
 
 Input Proguard Mapping
 
+### DeObf jar
+
+Input Jar
+
 ### Mixin refmap update
 
 Input refmap.json

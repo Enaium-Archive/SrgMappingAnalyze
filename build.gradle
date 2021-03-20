@@ -5,7 +5,7 @@ plugins {
 }
 
 group 'cn.enaium'
-version '0.1'
+version '0.2'
 
 repositories {
     mavenCentral()
@@ -14,19 +14,21 @@ repositories {
 dependencies {
     implementation('commons-io:commons-io:1.0')
     implementation('com.google.code.gson:gson:2.8.0')
+    implementation('org.ow2.asm:asm-all:5.2')
 }
 
 shadowJar {
     dependencies {
         include(dependency('com.google.code.gson:gson'))
         include(dependency('commons-io:commons-io'))
+        include(dependency('org.ow2.asm:asm-all:5.2'))
     }
 }
 
 uploadArchives {
     repositories.mavenDeployer {
         def MAVEN_URL = System.getenv('MAVEN_URL')
-        if(MAVEN_URL != null) {
+        if (MAVEN_URL != null) {
             repository(url: "file://${new File(MAVEN_URL)}")
         }
     }

@@ -5,8 +5,20 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.commons.ClassRemapper;
+import org.objectweb.asm.commons.SimpleRemapper;
 
+import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
+import java.util.zip.ZipOutputStream;
+
+import static org.objectweb.asm.Opcodes.ASM5;
 
 /**
  * Project: SrgMappingAnalyze
@@ -15,11 +27,12 @@ import java.util.*;
 public class SrgMappingAnalyze {
 
     private static final HashMap<String, Object> nameToClass = new HashMap<>();
+    public static final HashMap<String, String> map = new HashMap<>();
 
     private static final String NAME_LINE = "^.+:";
     private static final String SPLITTER = "( |->)+";
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         System.out.println("          _____                    _____                    _____          \n" +
                 "         /\\    \\                  /\\    \\                  /\\    \\         \n" +
                 "        /::\\    \\                /::\\____\\                /::\\    \\        \n" +
@@ -44,6 +57,7 @@ public class SrgMappingAnalyze {
                 "\n");
         System.out.println("SMA (SrgMappingAnalyze) By:Enaium");
 
+
         program();
     }
 
@@ -65,12 +79,13 @@ public class SrgMappingAnalyze {
         SMA.INSTANCE.classCleanToObfMap.forEach((k, v) -> nameToClass.put(k.substring(k.lastIndexOf("/") + 1), k));
     }
 
-    private static void program() {
+    private static void program() throws IOException {
         System.out.println("Features:");
         System.out.println("[0]:Mapping key to value,value to key");
         System.out.println("[1]:Proguard mapping to Srg mapping");
-        System.out.println("[2]:Mixin refmap update");
-        System.out.println("[3]:Mixin refmap builder");
+        System.out.println("[2]:DeObf jar");
+        System.out.println("[3]:Mixin refmap update");
+        System.out.println("[4]:Mixin refmap builder");
         System.out.println("Input:");
         Scanner features = new Scanner(System.in);
         switch (features.nextInt()) {
@@ -176,6 +191,57 @@ public class SrgMappingAnalyze {
                 break;
             }
             case 2: {
+
+                inputMapping();
+
+                map.putAll(SMA.INSTANCE.classObfToCleanMap);
+
+                SMA.INSTANCE.fieldObfToCleanMap.forEach((k, v) -> {
+                    String obfClassName = k.substring(0, k.lastIndexOf("/"));
+                    String obfFiledName = k.substring(k.lastIndexOf("/") + 1);
+                    map.put(obfClassName + "." + obfFiledName, v.substring(v.lastIndexOf("/") + 1));
+                });
+
+                SMA.INSTANCE.methodObfToCleanMap.forEach((k, v) -> {
+                    String obfLeft = k.split(" ")[0];
+                    String obfRight = k.split(" ")[1];
+                    String cleanLeft = v.split(" ")[0];
+                    String cleanMethodName = cleanLeft.substring(cleanLeft.lastIndexOf("/") + 1);
+                    String obfClassName = obfLeft.substring(0, obfLeft.lastIndexOf("/"));
+                    String obfMethodName = obfLeft.substring(obfLeft.lastIndexOf("/") + 1);
+                    map.put(obfClassName + "." + obfMethodName + obfRight, cleanMethodName);
+                });
+
+                System.out.println("Input Jar:");
+                String jarPath = new Scanner(System.in).next();
+                String jarFile = jarPath.substring(0, jarPath.lastIndexOf("."));
+                String jarSuffix = jarPath.substring(jarPath.lastIndexOf(".") + 1);
+
+                System.out.println("DeObf Start");
+
+                ZipOutputStream jarOutputStream = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(jarFile + "_DeObf." + jarSuffix)), StandardCharsets.UTF_8);
+                JarFile jar = new JarFile(new File(jarPath));
+                Enumeration<JarEntry> entries = jar.entries();
+                while (entries.hasMoreElements()) {
+                    JarEntry entry = entries.nextElement();
+                    jarOutputStream.setComment("SrgMappingAnalyze by Enaium");
+                    if (entry.isDirectory())
+                        continue;
+                    if (entry.getName().endsWith(".class")) {
+                        jarOutputStream.putNextEntry(new JarEntry(map.get(entry.getName().replace(".class", "")) + ".class"));
+                        acceptClass(jar.getInputStream(entry), jarOutputStream);
+                    } else {
+                        jarOutputStream.putNextEntry(new JarEntry(entry.getName()));
+                        copyFile(jar.getInputStream(entry), jarOutputStream);
+                    }
+                    jarOutputStream.closeEntry();
+                }
+                jarOutputStream.close();
+
+                System.out.println("DeObf End");
+                break;
+            }
+            case 3: {
                 inputMapping();
                 System.out.println("Warning: MixinName = clean name + Mixin(such as MinecraftMixin or MixinMinecraft)");
                 System.out.println("Input refmap:");
@@ -208,7 +274,7 @@ public class SrgMappingAnalyze {
 
                 FileUtils.write(refmapFile + "_update." + refmapSuffix, new GsonBuilder().setPrettyPrinting().create().toJson(newJsonObject.getAsJsonObject()));
             }
-            case 3: {
+            case 4: {
                 System.out.println("Please use annotation processor\nOnly support @Mixin and @Inject");
                 break;
             }
@@ -251,6 +317,44 @@ public class SrgMappingAnalyze {
                 return true;
             default:
                 return false;
+        }
+    }
+
+    public static void acceptClass(InputStream input, OutputStream output) throws IOException {
+        ClassReader classReader = new ClassReader(input);
+        ClassWriter classWriter = new ClassWriter(0);
+        ClassRemapper classRemapper = new ClassRemapper(new ClassVisitor(ASM5, classWriter) {
+        }, new SimpleRemapper(map) {
+            @Override
+            public String mapMethodName(String owner, String name, String desc) {
+                return super.mapMethodName(owner, name, desc);
+            }
+
+            @Override
+            public String mapInvokeDynamicMethodName(String name, String desc) {
+                return super.mapInvokeDynamicMethodName(name, desc);
+            }
+
+            @Override
+            public String mapFieldName(String owner, String name, String desc) {
+                return super.mapFieldName(owner, name, desc);
+            }
+
+            @Override
+            public String map(String key) {
+                return super.map(key);
+            }
+        });
+        classReader.accept(classRemapper, ClassReader.SKIP_DEBUG);
+        output.write(classWriter.toByteArray());
+        output.flush();
+    }
+
+    public static void copyFile(InputStream input, OutputStream output) throws IOException {
+        byte[] buffer = new byte[1024];
+        int c;
+        while ((c = input.read(buffer)) != -1) {
+            output.write(buffer, 0, c);
         }
     }
 }
