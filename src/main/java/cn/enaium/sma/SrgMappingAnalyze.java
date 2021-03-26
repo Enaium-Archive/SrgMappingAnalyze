@@ -5,6 +5,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import org.apache.commons.io.IOUtils;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
@@ -84,8 +85,9 @@ public class SrgMappingAnalyze {
         System.out.println("[0]:Mapping key to value,value to key");
         System.out.println("[1]:Proguard mapping to Srg mapping");
         System.out.println("[2]:DeObf jar");
-        System.out.println("[3]:Mixin refmap update");
-        System.out.println("[4]:Mixin refmap builder");
+        System.out.println("[3]:ReObf jar");
+        System.out.println("[4]:Mixin refmap update");
+        System.out.println("[5]:Mixin refmap builder");
         System.out.println("Input:");
         Scanner features = new Scanner(System.in);
         switch (features.nextInt()) {
@@ -101,147 +103,28 @@ public class SrgMappingAnalyze {
             case 1: {
                 System.out.println("Input Proguard Mapping:");
                 String proguardPath = new Scanner(System.in).next();
-                String proguardFile = proguardPath.substring(0, proguardPath.lastIndexOf("."));
-                String proguardSuffix = proguardPath.substring(proguardPath.lastIndexOf(".") + 1);
-                String text = Objects.requireNonNull(FileUtils.read(proguardPath));
-                {
-                    String[] lines = text.split("\\r\\n|\\n");
-                    for (String line : lines) {
-                        if (line.startsWith("#"))
-                            continue;
-
-                        //class
-                        if (line.matches(NAME_LINE)) {
-                            String[] split = line.split(SPLITTER);
-                            String clean = internalize(split[0]);
-                            String obf = internalize(split[1]);
-                            obf = obf.substring(0, obf.indexOf(':'));
-                            SMA.INSTANCE.classObfToCleanMap.put(obf, clean);
-                            SMA.INSTANCE.classCleanToObfMap.put(clean, obf);
-                        }
-                    }
-                }
-
-                {
-                    String[] lines = text.split("\\r\\n|\\n");
-                    String currentObfClass = null;
-                    String currentCleanClass = null;
-                    for (String line : lines) {
-                        if (line.startsWith("#"))
-                            continue;
-
-                        if (line.matches(NAME_LINE)) {
-                            currentObfClass = line.substring(line.lastIndexOf(" ") + 1, line.indexOf(":"));
-                            currentCleanClass = SMA.INSTANCE.classObfToCleanMap.getOrDefault(currentObfClass, internalize(currentObfClass));
-                            continue;
-                        }
-
-                        if (currentObfClass == null)
-                            throw new NullPointerException(line + " No Class");
-
-
-                        if (!line.contains("(")) {
-                            //Field
-                            String[] split = line.trim().split(SPLITTER);
-                            String clean = currentCleanClass + "/" + split[1];
-                            String obf = currentObfClass + "/" + split[2];
-                            SMA.INSTANCE.fieldObfToCleanMap.put(obf, clean);
-                            SMA.INSTANCE.fieldCleanToObfMap.put(clean, obf);
-                        } else {
-                            //Method
-                            String[] split = line.contains(":") ? line.substring(line.lastIndexOf(":") + 1).trim().split(SPLITTER) : line.trim().split(SPLITTER);
-                            String cleanReturn = !isPrimitive(split[0]) ? "L" + internalize(split[0]) + ";" : internalize(split[0]);
-                            String cleanName = split[1].substring(0, split[1].lastIndexOf("("));
-                            String cleanArgs = split[1].substring(split[1].indexOf("(") + 1, split[1].lastIndexOf(")"));
-                            String obfReturn = !isPrimitive(split[0]) ? "L" + SMA.INSTANCE.classCleanToObfMap.getOrDefault(internalize(split[0]), internalize(split[0])) + ";" : cleanReturn;
-                            String obfName = split[2];
-                            String obfArgs;
-
-                            if (!cleanArgs.equals("")) {
-                                StringBuilder tempCleanArs = new StringBuilder();
-                                StringBuilder tempObfArs = new StringBuilder();
-                                for (String s : cleanArgs.split(",")) {
-                                    if (!isPrimitive(s)) {
-                                        tempObfArs.append("L").append(SMA.INSTANCE.classCleanToObfMap.getOrDefault(internalize(s), internalize(s))).append(";");
-                                        tempCleanArs.append("L").append(internalize(s)).append(";");
-                                    } else {
-                                        tempObfArs.append(internalize(s));
-                                        tempCleanArs.append(internalize(s));
-                                    }
-                                }
-                                obfArgs = "(" + tempObfArs.toString() + ")";
-                                cleanArgs = "(" + tempCleanArs.toString() + ")";
-                            } else {
-                                obfArgs = "()";
-                                cleanArgs = "()";
-                            }
-
-                            String obf = currentObfClass + "/" + obfName + " " + obfArgs + obfReturn;
-                            String clean = currentCleanClass + "/" + cleanName + " " + cleanArgs + cleanReturn;
-                            SMA.INSTANCE.methodObfToCleanMap.put(obf, clean);
-                            SMA.INSTANCE.methodCleanToObfMap.put(clean, obf);
-                        }
-                    }
-                }
-                StringBuilder stringBuilder = new StringBuilder();
-                SMA.INSTANCE.classObfToCleanMap.forEach((k, v) -> stringBuilder.append("CL: ").append(k).append(" ").append(v).append("\n"));
-                SMA.INSTANCE.fieldObfToCleanMap.forEach((k, v) -> stringBuilder.append("FD: ").append(k).append(" ").append(v).append("\n"));
-                SMA.INSTANCE.methodObfToCleanMap.forEach((k, v) -> stringBuilder.append("MD: ").append(k).append(" ").append(v).append("\n"));
-                FileUtils.write(proguardFile + "_to_srg." + proguardSuffix, stringBuilder.toString());
+                proguardToSrg(proguardPath);
                 break;
             }
             case 2: {
-
                 inputMapping();
-
-                map.putAll(SMA.INSTANCE.classObfToCleanMap);
-
-                SMA.INSTANCE.fieldObfToCleanMap.forEach((k, v) -> {
-                    String obfClassName = k.substring(0, k.lastIndexOf("/"));
-                    String obfFiledName = k.substring(k.lastIndexOf("/") + 1);
-                    map.put(obfClassName + "." + obfFiledName, v.substring(v.lastIndexOf("/") + 1));
-                });
-
-                SMA.INSTANCE.methodObfToCleanMap.forEach((k, v) -> {
-                    String obfLeft = k.split(" ")[0];
-                    String obfRight = k.split(" ")[1];
-                    String cleanLeft = v.split(" ")[0];
-                    String cleanMethodName = cleanLeft.substring(cleanLeft.lastIndexOf("/") + 1);
-                    String obfClassName = obfLeft.substring(0, obfLeft.lastIndexOf("/"));
-                    String obfMethodName = obfLeft.substring(obfLeft.lastIndexOf("/") + 1);
-                    map.put(obfClassName + "." + obfMethodName + obfRight, cleanMethodName);
-                });
-
                 System.out.println("Input Jar:");
                 String jarPath = new Scanner(System.in).next();
-                String jarFile = jarPath.substring(0, jarPath.lastIndexOf("."));
-                String jarSuffix = jarPath.substring(jarPath.lastIndexOf(".") + 1);
-
-                System.out.println("DeObf Start");
-
-                ZipOutputStream jarOutputStream = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(jarFile + "_DeObf." + jarSuffix)), StandardCharsets.UTF_8);
-                JarFile jar = new JarFile(new File(jarPath));
-                Enumeration<JarEntry> entries = jar.entries();
-                while (entries.hasMoreElements()) {
-                    JarEntry entry = entries.nextElement();
-                    jarOutputStream.setComment("SrgMappingAnalyze by Enaium");
-                    if (entry.isDirectory())
-                        continue;
-                    if (entry.getName().endsWith(".class")) {
-                        jarOutputStream.putNextEntry(new JarEntry(map.get(entry.getName().replace(".class", "")) + ".class"));
-                        acceptClass(jar.getInputStream(entry), jarOutputStream);
-                    } else {
-                        jarOutputStream.putNextEntry(new JarEntry(entry.getName()));
-                        copyFile(jar.getInputStream(entry), jarOutputStream);
-                    }
-                    jarOutputStream.closeEntry();
-                }
-                jarOutputStream.close();
-
-                System.out.println("DeObf End");
+                System.out.println("DeObf Jar start");
+                remapJar(jarPath, true);
+                System.out.println("DeObf Jar end");
                 break;
             }
             case 3: {
+                inputMapping();
+                System.out.println("Input Jar:");
+                String jarPath = new Scanner(System.in).next();
+                System.out.println("ReObf Jar start");
+                remapJar(jarPath, false);
+                System.out.println("ReObf Jar end");
+                break;
+            }
+            case 4: {
                 inputMapping();
                 System.out.println("Warning: MixinName = clean name + Mixin(such as MinecraftMixin or MixinMinecraft)");
                 System.out.println("Input refmap:");
@@ -274,7 +157,7 @@ public class SrgMappingAnalyze {
 
                 FileUtils.write(refmapFile + "_update." + refmapSuffix, new GsonBuilder().setPrettyPrinting().create().toJson(newJsonObject.getAsJsonObject()));
             }
-            case 4: {
+            case 5: {
                 System.out.println("Please use annotation processor\nOnly support @Mixin and @Inject");
                 break;
             }
@@ -320,35 +203,166 @@ public class SrgMappingAnalyze {
         }
     }
 
+    public static void proguardToSrg(String proguardPath) {
+        String proguardFile = proguardPath.substring(0, proguardPath.lastIndexOf("."));
+        String proguardSuffix = proguardPath.substring(proguardPath.lastIndexOf(".") + 1);
+        String text = Objects.requireNonNull(FileUtils.read(proguardPath));
+        {
+            String[] lines = text.split("\\r\\n|\\n");
+            for (String line : lines) {
+                if (line.startsWith("#"))
+                    continue;
+
+                //class
+                if (line.matches(NAME_LINE)) {
+                    String[] split = line.split(SPLITTER);
+                    String clean = internalize(split[0]);
+                    String obf = internalize(split[1]);
+                    obf = obf.substring(0, obf.indexOf(':'));
+                    SMA.INSTANCE.classObfToCleanMap.put(obf, clean);
+                    SMA.INSTANCE.classCleanToObfMap.put(clean, obf);
+                }
+            }
+        }
+
+        {
+            String[] lines = text.split("\\r\\n|\\n");
+            String currentObfClass = null;
+            String currentCleanClass = null;
+            for (String line : lines) {
+                if (line.startsWith("#"))
+                    continue;
+
+                if (line.matches(NAME_LINE)) {
+                    currentObfClass = line.substring(line.lastIndexOf(" ") + 1, line.indexOf(":"));
+                    currentCleanClass = SMA.INSTANCE.classObfToCleanMap.getOrDefault(currentObfClass, internalize(currentObfClass));
+                    continue;
+                }
+
+                if (currentObfClass == null)
+                    throw new NullPointerException(line + " No Class");
+
+
+                if (!line.contains("(")) {
+                    //Field
+                    String[] split = line.trim().split(SPLITTER);
+                    String clean = currentCleanClass + "/" + split[1];
+                    String obf = currentObfClass + "/" + split[2];
+                    SMA.INSTANCE.fieldObfToCleanMap.put(obf, clean);
+                    SMA.INSTANCE.fieldCleanToObfMap.put(clean, obf);
+                } else {
+                    //Method
+                    String[] split = line.contains(":") ? line.substring(line.lastIndexOf(":") + 1).trim().split(SPLITTER) : line.trim().split(SPLITTER);
+                    String cleanReturn = !isPrimitive(split[0]) ? "L" + internalize(split[0]) + ";" : internalize(split[0]);
+                    String cleanName = split[1].substring(0, split[1].lastIndexOf("("));
+                    String cleanArgs = split[1].substring(split[1].indexOf("(") + 1, split[1].lastIndexOf(")"));
+                    String obfReturn = !isPrimitive(split[0]) ? "L" + SMA.INSTANCE.classCleanToObfMap.getOrDefault(internalize(split[0]), internalize(split[0])) + ";" : cleanReturn;
+                    String obfName = split[2];
+                    String obfArgs;
+
+                    if (!cleanArgs.equals("")) {
+                        StringBuilder tempCleanArs = new StringBuilder();
+                        StringBuilder tempObfArs = new StringBuilder();
+                        for (String s : cleanArgs.split(",")) {
+                            if (!isPrimitive(s)) {
+                                tempObfArs.append("L").append(SMA.INSTANCE.classCleanToObfMap.getOrDefault(internalize(s), internalize(s))).append(";");
+                                tempCleanArs.append("L").append(internalize(s)).append(";");
+                            } else {
+                                tempObfArs.append(internalize(s));
+                                tempCleanArs.append(internalize(s));
+                            }
+                        }
+                        obfArgs = "(" + tempObfArs.toString() + ")";
+                        cleanArgs = "(" + tempCleanArs.toString() + ")";
+                    } else {
+                        obfArgs = "()";
+                        cleanArgs = "()";
+                    }
+
+                    String obf = currentObfClass + "/" + obfName + " " + obfArgs + obfReturn;
+                    String clean = currentCleanClass + "/" + cleanName + " " + cleanArgs + cleanReturn;
+                    SMA.INSTANCE.methodObfToCleanMap.put(obf, clean);
+                    SMA.INSTANCE.methodCleanToObfMap.put(clean, obf);
+                }
+            }
+        }
+        StringBuilder stringBuilder = new StringBuilder();
+        SMA.INSTANCE.classObfToCleanMap.forEach((k, v) -> stringBuilder.append("CL: ").append(k).append(" ").append(v).append("\n"));
+        SMA.INSTANCE.fieldObfToCleanMap.forEach((k, v) -> stringBuilder.append("FD: ").append(k).append(" ").append(v).append("\n"));
+        SMA.INSTANCE.methodObfToCleanMap.forEach((k, v) -> stringBuilder.append("MD: ").append(k).append(" ").append(v).append("\n"));
+        FileUtils.write(proguardFile + "_to_srg." + proguardSuffix, stringBuilder.toString());
+    }
+
+    public static void remapJar(String jarPath, boolean deObf) throws IOException {
+
+        String jarFile = jarPath.substring(0, jarPath.lastIndexOf("."));
+        String jarSuffix = jarPath.substring(jarPath.lastIndexOf(".") + 1);
+
+        putRemap(deObf);
+
+        ZipOutputStream jarOutputStream = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(jarFile + (deObf ? "_DeObf." : "_ReObf.") + jarSuffix)), StandardCharsets.UTF_8);
+        JarFile jar = new JarFile(new File(jarPath));
+        Enumeration<JarEntry> entries = jar.entries();
+        while (entries.hasMoreElements()) {
+            JarEntry entry = entries.nextElement();
+            jarOutputStream.setComment("SrgMappingAnalyze by Enaium");
+            if (entry.isDirectory())
+                continue;
+            if (entry.getName().endsWith(".class")) {
+                jarOutputStream.putNextEntry(new JarEntry(map.getOrDefault(entry.getName().replace(".class", ""), entry.getName()) + ".class"));
+                acceptClass(jar.getInputStream(entry), jarOutputStream);
+            } else {
+                jarOutputStream.putNextEntry(new JarEntry(entry.getName()));
+                copyFile(jar.getInputStream(entry), jarOutputStream);
+            }
+            jarOutputStream.closeEntry();
+        }
+        jarOutputStream.close();
+    }
+
+    public static void putRemap(boolean deObf) {
+        if (deObf) {
+            map.putAll(SMA.INSTANCE.classObfToCleanMap);
+        } else {
+            map.putAll(SMA.INSTANCE.classCleanToObfMap);
+        }
+
+        SMA.INSTANCE.fieldObfToCleanMap.forEach((k, v) -> {
+            String key = deObf ? k : v;
+            String value = deObf ? v : k;
+            String obfClassName = key.substring(0, key.lastIndexOf("/"));
+            String obfFiledName = key.substring(key.lastIndexOf("/") + 1);
+            map.put(obfClassName + "." + obfFiledName, value.substring(value.lastIndexOf("/") + 1));
+        });
+
+        SMA.INSTANCE.methodObfToCleanMap.forEach((k, v) -> {
+            String key = deObf ? k : v;
+            String value = deObf ? v : k;
+            String obfLeft = key.split(" ")[0];
+            String obfRight = key.split(" ")[1];
+            String cleanLeft = value.split(" ")[0];
+            String cleanMethodName = cleanLeft.substring(cleanLeft.lastIndexOf("/") + 1);
+            String obfClassName = obfLeft.substring(0, obfLeft.lastIndexOf("/"));
+            String obfMethodName = obfLeft.substring(obfLeft.lastIndexOf("/") + 1);
+            map.put(obfClassName + "." + obfMethodName + obfRight, cleanMethodName);
+        });
+    }
+
     public static void acceptClass(InputStream input, OutputStream output) throws IOException {
-        ClassReader classReader = new ClassReader(input);
+        output.write(accept(IOUtils.toByteArray(input)));
+        output.flush();
+    }
+
+    public static byte[] accept(byte[] bytes) {
+        ClassReader classReader = new ClassReader(bytes);
         ClassWriter classWriter = new ClassWriter(0);
         ClassRemapper classRemapper = new ClassRemapper(new ClassVisitor(ASM5, classWriter) {
         }, new SimpleRemapper(map) {
-            @Override
-            public String mapMethodName(String owner, String name, String desc) {
-                return super.mapMethodName(owner, name, desc);
-            }
-
-            @Override
-            public String mapInvokeDynamicMethodName(String name, String desc) {
-                return super.mapInvokeDynamicMethodName(name, desc);
-            }
-
-            @Override
-            public String mapFieldName(String owner, String name, String desc) {
-                return super.mapFieldName(owner, name, desc);
-            }
-
-            @Override
-            public String map(String key) {
-                return super.map(key);
-            }
         });
         classReader.accept(classRemapper, ClassReader.SKIP_DEBUG);
-        output.write(classWriter.toByteArray());
-        output.flush();
+        return classWriter.toByteArray();
     }
+
 
     public static void copyFile(InputStream input, OutputStream output) throws IOException {
         byte[] buffer = new byte[1024];
