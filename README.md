@@ -28,8 +28,8 @@ repositories {
 }
 
 dependencies {
-    annotationProcessor implementation('cn.enaium:SrgMappingAnalyze:0.1')
-    implementation('cn.enaium:SrgMappingAnalyze:0.1')
+    annotationProcessor implementation('cn.enaium:SrgMappingAnalyze:0.3')
+    implementation('cn.enaium:SrgMappingAnalyze:0.3')
 }
 
 compileJava {
