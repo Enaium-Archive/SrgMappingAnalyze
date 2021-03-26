@@ -5,16 +5,16 @@ plugins {
 }
 
 group 'cn.enaium'
-version '0.2'
+version '0.3'
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
-    implementation('commons-io:commons-io:1.0')
-    implementation('com.google.code.gson:gson:2.8.0')
-    implementation('org.ow2.asm:asm-all:5.2')
+    compileOnly('commons-io:commons-io:1.0')
+    compileOnly('com.google.code.gson:gson:2.8.0')
+    compileOnly('org.ow2.asm:asm-all:5.2')
 }
 
 shadowJar {
